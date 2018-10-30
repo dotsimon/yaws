@@ -735,7 +735,7 @@ gserv_loop(GS, Ready, Rnum, Last) ->
                 true ->
                     stop_stats(OldSc),
                     NewSc1 = start_stats(NewSc),
-                    stop_ready(Ready, Last),
+                    stop_ready(Ready, Last, get(top)),
                     NewSc2 = clear_ets_complete(
                                NewSc1#sconf{ets = OldSc#sconf.ets}
                               ),
@@ -758,7 +758,7 @@ gserv_loop(GS, Ready, Rnum, Last) ->
                     error_logger:error_msg("gserv: No found SC ~n",[]),
                     erlang:error(nosc);
                 true ->
-                    stop_ready(Ready, Last),
+                    stop_ready(Ready, Last, get(top)),
                     GS2 = GS#gs{group =  lists:delete(OldSc,GS#gs.group)},
                     Ready2 = [],
                     stop_stats(OldSc),
@@ -772,7 +772,7 @@ gserv_loop(GS, Ready, Rnum, Last) ->
 
         {add_sconf, From, Pos, SC0, Adder} ->
             SC = start_stats(SC0),
-            stop_ready(Ready, Last),
+            stop_ready(Ready, Last, get(top)),
             SC2 = setup_ets(SC),
             GS2 = GS#gs{group =  yaws:insert_at(SC2, Pos, GS#gs.group)},
             Ready2 = [],
@@ -814,7 +814,7 @@ gserv_loop(GS, Ready, Rnum, Last) ->
                     exit(normal)
             end;
         {update_gconf, GC} ->
-            stop_ready(Ready, Last),
+            stop_ready(Ready, Last, get(top)),
             GS2 = GS#gs{gconf = GC},
             Ready2 = [],
             put(gc, GC),
@@ -837,6 +837,13 @@ gserv_loop(GS, Ready, Rnum, Last) ->
             ?MODULE:gserv_loop(GS, R2, length(R2), Last)
     end.
 
+
+stop_ready(Ready, Last, Top) ->
+    stop_ready(Ready, Last),
+    {links, Ls} = process_info(self(), links),
+    %% do not send exit signal to yaws_server process or those we already handled
+    Ls1 = [Ls0 || Ls0 <- Ls, is_pid(Ls0)] -- [Top | Ready],
+    foreach(fun(X) -> unlink(X), exit(X, shutdown) end, Ls1).
 
 stop_ready(Ready, Last) ->
     error_logger:info_msg("stop_ready(~p, ~p)~n", [Ready, Last]),
@@ -1122,6 +1129,7 @@ acceptor0(GS, Top) ->
             end,
 
             %% we cache processes
+	    process_flag(trap_exit, false),
             receive
                 {'EXIT', Top, Error} ->
                     exit(Error);
@@ -1185,7 +1193,6 @@ aloop(CliSock, {IP,Port}=IPPort, GS, Num) ->
             ok
     end,
 
-    process_flag(trap_exit, false),
     init_db(),
     SSL = GS#gs.ssl,
     Head = yaws:http_get_headers(CliSock, SSL),
