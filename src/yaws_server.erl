@@ -626,8 +626,9 @@ gserv_loop(GS, Ready, Rnum, Last) ->
                                         connections = GS#gs.connections - 1}
                   end,
             PoolSize = (GS#gs.gconf)#gconf.acceptor_pool_size,
+	    OldClient = lists:member(From, element(2,process_info(self(),links))) == false,
             if
-                Rnum == PoolSize ->
+                Rnum == PoolSize orelse OldClient ->
                     From ! {self(), stop},
                     ?MODULE:gserv_loop(GS2, Ready, Rnum, Last);
                 Rnum < PoolSize ->
